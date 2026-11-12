@@ -18,9 +18,9 @@ builds it in CATIA step by step with real features (pads, pockets, holes, patter
 
 ## Screenshots
 
-_Screenshots go in `docs/screenshots/` (e.g. `docs/screenshots/window.png`)._
+![The assistant modelling a bottle in CATIA V5 R20](docs/screenshots/window.png)
 
-<!-- ![Assistant window](docs/screenshots/window.png) -->
+*The assistant (right) built this bottle with a revolved profile (shaft) and a groove for the hollow inside, then checked and saved it.*
 
 ## What it does
 

@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Çalışma çıktıları / Working outputs
+work/
+logs/
+attachments/
+captures/
+*.CATPart
+*.CATProduct
+*.stl
+*.stp
+*.step
+
+# PyInstaller
+build/
+dist/
+release/

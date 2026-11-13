@@ -16,6 +16,12 @@ builds it in CATIA step by step with real features (pads, pockets, holes, patter
 > This project is **not affiliated with, endorsed by, or sponsored by Dassault Systèmes or Anthropic.**
 > CATIA is a trademark of Dassault Systèmes. Claude is a trademark of Anthropic.
 
+## Demo
+
+![The assistant building a mangonel catapult (parts + assembly) in CATIA V5, sped up ~9.5×](docs/screenshots/demo.gif)
+
+*A ~5-minute session building a catapult — parts, then the assembly with constraints — sped up to 30 seconds.*
+
 ## Screenshots
 
 ![The assistant modelling a bottle in CATIA V5 R20](docs/screenshots/window.png)

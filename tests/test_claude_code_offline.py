@@ -44,7 +44,7 @@ def test_mcp_lists_all_tools_with_schemas(server):
     names = {t.name for t in res.tools}
     assert names == set(REGISTRY.tools) | {"present_plan"}
     pad = next(t for t in res.tools if t.name == "pad")
-    assert pad.input_schema["required"] == ["sketch"]
+    assert {"sketch", "profile", "expect"} <= set(pad.input_schema["properties"])
 
 
 def test_mcp_call_returns_text_and_image_and_emits_events(server):

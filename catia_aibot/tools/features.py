@@ -69,6 +69,24 @@ class _Op:
         return out
 
 
+PROFILE_PROP = {"type": "object", "description": "sketch yerine satır içi {support, elements, constraints} (create_sketch biçimi)."}
+
+
+def _profile_sketch(s: CatiaSession, op: "_Op", sketch: str | None, profile: dict | None):
+    """Ya var olan sketch'i ya da satır içi profilden yeni bir sketch'i döndürür: (sketch, kısa rapor)."""
+    if profile:
+        from .sketch import create_sketch
+
+        rep = create_sketch(s, profile["support"], profile.get("elements") or [], document=op.doc.Name,
+                            body=op.body.Name, constraints=profile.get("constraints"), name=profile.get("name"))
+        op.part.InWorkObject = op.body
+        brief = {"sketch": rep["sketch"], "fully_constrained": rep["fully_constrained"], "local_axes": rep["local_axes"]}
+        return _sketch(s, op.part, rep["sketch"]), brief
+    if not sketch:
+        raise ToolError("sketch ya da profile verin.")
+    return _sketch(s, op.part, sketch), None
+
+
 def _sketch(s: CatiaSession, part, name: str):
     sk = s.find_object(part, name)
     if s.typename(sk) != "Sketch":
@@ -108,21 +126,19 @@ def _direction_ref(s: CatiaSession, part, topo: Topology | None, spec, normal: b
 # ============================================================== sketch tabanlı
 @tool(
     "pad",
-    """Kapalı bir sketch profilinden pad (ekstrüzyon) oluşturur. length mm. symmetric=true ise iki yöne eşit (toplam length).
-reverse yönü çevirir. limit: 'dimension' (varsayılan) | 'last' | 'next' | 'plane' (up_to_plane ile).
-second_length: ters yöndeki ek uzunluk.""",
+    """Kapalı profilden pad: length; symmetric (toplam length), reverse, second_length, limit dimension|last|next|plane(up_to_plane).""",
     {"properties": {
-        "document": DOC_PROP, "body": BODY_PROP, "sketch": {"type": "string"},
+        "document": DOC_PROP, "body": BODY_PROP, "sketch": {"type": "string"}, "profile": PROFILE_PROP,
         "length": {"type": "number"}, "second_length": {"type": "number"},
         "symmetric": {"type": "boolean"}, "reverse": {"type": "boolean"},
         "limit": {"enum": ["dimension", "last", "next", "plane"]}, "up_to_plane": {"type": "string"},
         "name": {"type": "string"},
-    }, "required": ["sketch"]},
+    }},
 )
-def pad(s, sketch, length=10.0, document=None, body=None, second_length=None, symmetric=False, reverse=False,
+def pad(s, sketch=None, profile=None, length=10.0, document=None, body=None, second_length=None, symmetric=False, reverse=False,
         limit=None, up_to_plane=None, name=None):
     op = _Op(s, document, body)
-    sk = _sketch(s, op.part, sketch)
+    sk, skrep = _profile_sketch(s, op, sketch, profile)
     if symmetric:
         f = op.track(op.sf.AddNewPad(sk, float(length) / 2))
         f.IsSymmetric = True
@@ -135,24 +151,23 @@ def pad(s, sketch, length=10.0, document=None, body=None, second_length=None, sy
         f.DirectionOrientation = 1
     if name:
         f.Name = name
-    return op.finish(f, "add")
+    return op.finish(f, "add", {"profile_sketch": skrep} if skrep else None)
 
 
 @tool(
     "pocket",
-    """Kapalı bir sketch profiliyle malzeme boşaltır. depth mm; through_all=true ise sonuna kadar (up to last).
-Yön varsayılan olarak sketch normalinin tersidir (yüzeye açılan sketch'te malzemenin içine). Hacim azalmazsa reverse=true deneyin.""",
+    """Kapalı profille boşaltma: depth ya da through_all; yön sketch normalinin tersi (hacim azalmazsa reverse); symmetric, limit.""",
     {"properties": {
-        "document": DOC_PROP, "body": BODY_PROP, "sketch": {"type": "string"},
+        "document": DOC_PROP, "body": BODY_PROP, "sketch": {"type": "string"}, "profile": PROFILE_PROP,
         "depth": {"type": "number"}, "through_all": {"type": "boolean"}, "symmetric": {"type": "boolean"},
         "reverse": {"type": "boolean"}, "limit": {"enum": ["dimension", "last", "next", "plane"]},
         "up_to_plane": {"type": "string"}, "name": {"type": "string"},
-    }, "required": ["sketch"]},
+    }},
 )
-def pocket(s, sketch, depth=10.0, document=None, body=None, through_all=False, symmetric=False, reverse=False,
+def pocket(s, sketch=None, profile=None, depth=10.0, document=None, body=None, through_all=False, symmetric=False, reverse=False,
            limit=None, up_to_plane=None, name=None):
     op = _Op(s, document, body)
-    sk = _sketch(s, op.part, sketch)
+    sk, skrep = _profile_sketch(s, op, sketch, profile)
     f = op.track(op.sf.AddNewPocket(sk, float(depth) / (2 if symmetric else 1)))
     if symmetric:
         f.IsSymmetric = True
@@ -161,113 +176,188 @@ def pocket(s, sketch, depth=10.0, document=None, body=None, through_all=False, s
         f.DirectionOrientation = 1
     if name:
         f.Name = name
-    return op.finish(f, "remove")
+    return op.finish(f, "remove", {"profile_sketch": skrep} if skrep else None)
 
 
 @tool(
     "shaft",
-    "Sketch'teki 'axis' öğesi etrafında profili döndürerek katı oluşturur. angle derece (varsayılan 360).",
-    {"properties": {"document": DOC_PROP, "body": BODY_PROP, "sketch": {"type": "string"},
+    """'axis' öğeli profili eksen etrafında döndürür (angle°, varsayılan 360).""",
+    {"properties": {"document": DOC_PROP, "body": BODY_PROP, "sketch": {"type": "string"}, "profile": PROFILE_PROP,
                     "angle": {"type": "number"}, "second_angle": {"type": "number"}, "name": {"type": "string"}},
-     "required": ["sketch"]},
+     },
 )
-def shaft(s, sketch, angle=360.0, second_angle=0.0, document=None, body=None, name=None):
+def shaft(s, sketch=None, profile=None, angle=360.0, second_angle=0.0, document=None, body=None, name=None):
     op = _Op(s, document, body)
-    sk = _sketch(s, op.part, sketch)
+    sk, skrep = _profile_sketch(s, op, sketch, profile)
     f = op.track(op.sf.AddNewShaft(sk))
     f.FirstAngle.Value = float(angle)
     f.SecondAngle.Value = float(second_angle)
     if name:
         f.Name = name
-    return op.finish(f, "add")
+    return op.finish(f, "add", {"profile_sketch": skrep} if skrep else None)
 
 
 @tool(
     "groove",
-    "Sketch'teki 'axis' öğesi etrafında profili döndürerek malzeme boşaltır (dönel pocket). angle derece.",
-    {"properties": {"document": DOC_PROP, "body": BODY_PROP, "sketch": {"type": "string"},
+    """'axis' öğeli profille dönel boşaltma (angle°, varsayılan 360).""",
+    {"properties": {"document": DOC_PROP, "body": BODY_PROP, "sketch": {"type": "string"}, "profile": PROFILE_PROP,
                     "angle": {"type": "number"}, "second_angle": {"type": "number"}, "name": {"type": "string"}},
-     "required": ["sketch"]},
+     },
 )
-def groove(s, sketch, angle=360.0, second_angle=0.0, document=None, body=None, name=None):
+def groove(s, sketch=None, profile=None, angle=360.0, second_angle=0.0, document=None, body=None, name=None):
     op = _Op(s, document, body)
-    sk = _sketch(s, op.part, sketch)
+    sk, skrep = _profile_sketch(s, op, sketch, profile)
     f = op.track(op.sf.AddNewGroove(sk))
     f.FirstAngle.Value = float(angle)
     f.SecondAngle.Value = float(second_angle)
     if name:
         f.Name = name
-    return op.finish(f, "remove")
+    return op.finish(f, "remove", {"profile_sketch": skrep} if skrep else None)
 
 
 # ================================================================ delik
 @tool(
     "hole",
-    """Düzlemsel bir yüzeye, verilen global noktada (mm) yüzeye dik delik açar. Nokta yüzey düzlemine izdüşürülür.
-through_all=true ise sonuna kadar; değilse depth. type: simple | counterbored (head_diameter, head_depth) | countersunk (head_diameter, head_angle).""",
+    """Düzlemsel yüzeye dik delik; position (ya da positions, çoklu) global nokta, yüzeye izdüşürülür. through_all ya da depth. type: simple|counterbored(head_diameter,head_depth)|countersunk(head_diameter,head_angle). thread: {size:'M2', pitch?, depth?, left_handed?} (kozmetik diş; diameter yoksa kılavuz çapı).""",
     {"properties": {
         "document": DOC_PROP, "body": BODY_PROP, "face": FACE_SELECTOR, "position": VEC3,
+        "positions": {"type": "array", "items": VEC3},
         "diameter": {"type": "number"}, "depth": {"type": "number"}, "through_all": {"type": "boolean"},
         "type": {"enum": ["simple", "counterbored", "countersunk"]},
         "head_diameter": {"type": "number"}, "head_depth": {"type": "number"}, "head_angle": {"type": "number"},
+        "thread": {"type": "object", "properties": {"size": {"type": "string"}, "pitch": {"type": "number"},
+                                                    "depth": {"type": "number"}, "left_handed": {"type": "boolean"}},
+                   "required": ["size"]},
         "name": {"type": "string"},
-    }, "required": ["face", "position", "diameter"]},
+    }, "required": ["face"]},
 )
-def hole(s, face, position, diameter, depth=None, through_all=False, type="simple", head_diameter=None,
-         head_depth=None, head_angle=None, document=None, body=None, name=None):
+def hole(s, face, position=None, diameter=None, depth=None, through_all=False, type="simple", head_diameter=None,
+         head_depth=None, head_angle=None, document=None, body=None, name=None, thread=None, positions=None):
+    thr = _thread_spec(thread) if thread else None
+    if diameter is None:
+        if thr is None:
+            raise ToolError("diameter ya da thread verin.")
+        diameter = thr["tap_drill"]
     op = _Op(s, document, body)
-    topo = Topology(s, op.doc, op.part, op.body)
-    fc = topo.resolve_faces(face, many=False)[0]
-    if fc.info.get("type") != "planar":
-        raise ToolError(f"{fc.id} düzlemsel değil; delik düzlemsel yüzeye açılır.")
-    n, c = fc.info.get("normal"), fc.info.get("center")
-    p = list(map(float, position))
-    if n and c:
-        d = dot([p[i] - c[i] for i in range(3)], n)
-        p = [p[i] - d * n[i] for i in range(3)]
+    pts = [list(map(float, q)) for q in (positions or ([position] if position is not None else []))]
+    if not pts:
+        raise ToolError("position ya da positions verin.")
     if not through_all and depth is None:
         raise ToolError("depth ya da through_all=true verin.")
-    # R20'de AddNewHoleFromPoint ile kurulan deliğin dairesel pattern'ı kesmiyor (doğrulandı);
-    # yüzeye açılan sketch'teki tam kısıtlı bir noktadan delik (AddNewHoleFromSketch) doğru çalışıyor
-    # ve konum CATIA'da düzenlenebilir ölçü olarak kalıyor.
-    sk = op.body.Sketches.Add(fc.ref)
-    op.track(sk)
-    ax = s.vb_array(sk, "GetAbsoluteAxisData", 9)
-    rel = [p[i] - ax[i] for i in range(3)]
-    u, v = dot(rel, ax[3:6]), dot(rel, ax[6:9])
-    meta = {"elements": {}, "dof": 0}
-    b = _Builder(s, op.doc, op.part, sk, meta)
+    face_sel = face
+    holes, placed, extra = [], [], {}
+    for k, q in enumerate(pts):
+        topo = Topology(s, op.doc, op.part, op.body)  # her delikten sonra topoloji tazelenir; yüz kimliği kalıcıdır
+        fc = topo.resolve_faces(face_sel, many=False)[0]
+        face_sel = fc.id
+        if fc.info.get("type") != "planar":
+            raise ToolError(f"{fc.id} düzlemsel değil; delik düzlemsel yüzeye açılır.")
+        n, c = fc.info.get("normal"), fc.info.get("center")
+        p = list(q)
+        if n and c:
+            d = dot([p[i] - c[i] for i in range(3)], n)
+            p = [p[i] - d * n[i] for i in range(3)]
+        # R20'de AddNewHoleFromPoint ile kurulan deliğin dairesel pattern'ı kesmiyor (doğrulandı);
+        # yüzeye açılan sketch'teki tam kısıtlı bir noktadan delik (AddNewHoleFromSketch) doğru çalışıyor
+        # ve konum CATIA'da düzenlenebilir ölçü olarak kalıyor.
+        sk = op.body.Sketches.Add(fc.ref)
+        op.track(sk)
+        ax = s.vb_array(sk, "GetAbsoluteAxisData", 9)
+        rel = [p[i] - ax[i] for i in range(3)]
+        u, v = dot(rel, ax[3:6]), dot(rel, ax[6:9])
+        meta = {"elements": {}, "dof": 0}
+        b = _Builder(s, op.doc, op.part, sk, meta)
+        try:
+            b.add_element({"type": "point", "id": "center", "at": [u, v]}, 1, True)
+        finally:
+            b.close()
+        s.sketch_meta[(op.doc.Name, sk.Name)] = meta
+        op.part.InWorkObject = op.body
+        h = op.track(op.sf.AddNewHoleFromSketch(sk, float(depth or 10.0)))
+        h.Type = {"simple": 0, "counterbored": 2, "countersunk": 3}[type]
+        h.Diameter.Value = float(diameter)
+        if through_all:
+            h.BottomLimit.LimitMode = 2
+        else:
+            # R20: AddNewHoleFromSketch'in derinlik argümanı uygulanmıyor, delik 10 mm kalıyordu (doğrulandı)
+            h.BottomLimit.Dimension.Value = float(depth)
+        if type == "counterbored":
+            if not (head_diameter and head_depth):
+                raise ToolError("counterbored için head_diameter ve head_depth gerekli.")
+            h.HeadDiameter.Value = float(head_diameter)
+            h.HeadDepth.Value = float(head_depth)
+        if type == "countersunk":
+            if not head_diameter:
+                raise ToolError("countersunk için head_diameter gerekli.")
+            h.CounterSunkMode = 1
+            h.HeadDiameter.Value = float(head_diameter)
+            h.HeadAngle.Value = float(head_angle or 90.0)
+        if thr is not None:
+            h.ThreadingMode = 0  # catThreadedHoleThreading
+            h.ThreadDiameter.Value = thr["nominal"]
+            h.ThreadPitch.Value = thr["pitch"]
+            tdepth = thr.get("depth") or (depth if not through_all else None)
+            if tdepth and not through_all and float(tdepth) >= float(depth):
+                # Kör delikte diş boyu delik derinliğine eşit/büyükse update hatası (R20'de doğrulandı)
+                tdepth = round(float(depth) - max(thr["pitch"], 0.5), 3)
+            if not tdepth:
+                # Sonuna kadar delikte diş boyu verilmezse CATIA varsayılanı (10 mm) parçadan uzun kalıp update hatası
+                # veriyor (R20'de doğrulandı). Diş boyu = gövdenin delik ekseni boyunca bu yüzden itibaren kalınlığı.
+                depths = [dot([c[i] - f.info["center"][i] for i in range(3)], n)
+                          for f in topo.faces() if f.info.get("center") and n and c]
+                tdepth = max([x for x in depths if x > 1e-6], default=None)
+            if tdepth:
+                h.ThreadDepth.Value = float(tdepth)
+            if thr.get("left_handed"):
+                h.ThreadSide = 1
+            extra["thread"] = {"size": thr["size"], "nominal_mm": thr["nominal"], "pitch_mm": thr["pitch"],
+                               "tap_drill_mm": float(diameter), "cosmetic": True}
+        if name:
+            h.Name = name if len(pts) == 1 else f"{name}.{k + 1}"
+        holes.append(h)
+        placed.append([r3(x) for x in p])
+        if len(pts) > 1:
+            bad = set(s.update(op.part)) - op.bad0
+            if bad:
+                raise ToolError(f"{h.Name} güncellenemedi ({sorted(bad)}); tüm delikler geri alındı.")
+    extra["face"] = face_sel
+    if len(holes) == 1:
+        extra["position"] = placed[0]
+    else:
+        extra["features"] = [h.Name for h in holes]
+        extra["positions"] = placed
+    return op.finish(holes[-1], "remove", extra)
+
+
+# ISO metrik kaba hatve (mm)
+METRIC_COARSE = {1.0: 0.25, 1.2: 0.25, 1.4: 0.3, 1.6: 0.35, 2.0: 0.4, 2.5: 0.45, 3.0: 0.5, 3.5: 0.6, 4.0: 0.7, 5.0: 0.8,
+                 6.0: 1.0, 8.0: 1.25, 10.0: 1.5, 12.0: 1.75, 14.0: 2.0, 16.0: 2.0, 20.0: 2.5, 24.0: 3.0}
+
+
+def _thread_spec(thread: dict) -> dict:
+    size = str(thread["size"]).strip().upper().replace(",", ".")
+    if not size.startswith("M"):
+        raise ToolError(f"Diş ölçüsü '{thread['size']}' anlaşılamadı.", hint="Metrik biçimde verin: 'M2', 'M3', 'M2.5'.")
     try:
-        b.add_element({"type": "point", "id": "center", "at": [u, v]}, 1, True)
-    finally:
-        b.close()
-    s.sketch_meta[(op.doc.Name, sk.Name)] = meta
-    op.part.InWorkObject = op.body
-    h = op.track(op.sf.AddNewHoleFromSketch(sk, float(depth or 10.0)))
-    h.Type = {"simple": 0, "counterbored": 2, "countersunk": 3}[type]
-    h.Diameter.Value = float(diameter)
-    if through_all:
-        h.BottomLimit.LimitMode = 2
-    if type == "counterbored":
-        if not (head_diameter and head_depth):
-            raise ToolError("counterbored için head_diameter ve head_depth gerekli.")
-        h.HeadDiameter.Value = float(head_diameter)
-        h.HeadDepth.Value = float(head_depth)
-    if type == "countersunk":
-        if not head_diameter:
-            raise ToolError("countersunk için head_diameter gerekli.")
-        h.CounterSunkMode = 1
-        h.HeadDiameter.Value = float(head_diameter)
-        h.HeadAngle.Value = float(head_angle or 90.0)
-    if name:
-        h.Name = name
-    return op.finish(h, "remove", {"face": fc.id, "position": [r3(x) for x in p]})
+        nominal = float(size[1:].split("X")[0])
+    except ValueError:
+        raise ToolError(f"Diş ölçüsü '{thread['size']}' anlaşılamadı.") from None
+    pitch = thread.get("pitch")
+    if pitch is None and "X" in size:
+        pitch = float(size.split("X")[1])
+    if pitch is None:
+        if nominal not in METRIC_COARSE:
+            raise ToolError(f"M{nominal:g} için kaba hatve tablomda yok.", hint="pitch'i açıkça verin.")
+        pitch = METRIC_COARSE[nominal]
+    return {"size": f"M{nominal:g}" + ("" if pitch == METRIC_COARSE.get(nominal) else f"x{pitch:g}"),
+            "nominal": nominal, "pitch": float(pitch), "tap_drill": round(nominal - float(pitch), 3),
+            "depth": thread.get("depth"), "left_handed": thread.get("left_handed", False)}
 
 
 # ============================================================= dress-up
 @tool(
     "fillet",
-    "Seçilen kenarlara sabit yarıçaplı fillet. edges bir kenar seçicisi (kimlikler ya da {parallel_to, on_face, between, ...}).",
+    """Kenarlara sabit yarıçaplı fillet.""",
     {"properties": {"document": DOC_PROP, "body": BODY_PROP, "edges": EDGE_SELECTOR, "radius": {"type": "number"},
                     "propagate_tangent": {"type": "boolean", "default": True}, "name": {"type": "string"}},
      "required": ["edges", "radius"]},
@@ -285,7 +375,7 @@ def fillet(s, edges, radius, propagate_tangent=True, document=None, body=None, n
 
 @tool(
     "chamfer",
-    "Seçilen kenarlara pah. length mm; angle derece (varsayılan 45) ya da length2 ile iki uzunluklu pah.",
+    """Kenarlara pah: length + angle (varsayılan 45°) ya da length2.""",
     {"properties": {"document": DOC_PROP, "body": BODY_PROP, "edges": EDGE_SELECTOR, "length": {"type": "number"},
                     "angle": {"type": "number"}, "length2": {"type": "number"}, "reverse": {"type": "boolean"},
                     "name": {"type": "string"}},
@@ -307,8 +397,7 @@ def chamfer(s, edges, length, angle=45.0, length2=None, reverse=False, document=
 # ============================================================ dönüşümler
 @tool(
     "rect_pattern",
-    """Bir feature'ın doğrusal/dikdörtgen dizisi. direction1/direction2: 'X','Y','Z' (önüne '-' ters yön) ya da doğrusal kenar seçici.
-count: kopya sayısı (orijinal dahil), spacing: aralık mm.""",
+    """Feature'ın doğrusal dizisi: direction1/2 'X'|'-Y'… ya da doğrusal kenar; count orijinal dahil; spacing mm. CATIA yönü ters yorumlarsa araç ölçüp düzeltir.""",
     {"properties": {
         "document": DOC_PROP, "body": BODY_PROP, "feature": {"type": "string"},
         "direction1": {"anyOf": [{"type": "string"}, {"type": "object"}]}, "count1": {"type": "integer"}, "spacing1": {"type": "number"},
@@ -391,8 +480,7 @@ def _verify_pattern_direction(s: CatiaSession, op: "_Op", src, pat, topo: Topolo
 
 @tool(
     "circ_pattern",
-    """Bir feature'ın dairesel dizisi. axis: 'X','Y','Z' (parça orijininden geçen eksen) ya da silindirik yüzey/doğrusal kenar seçici.
-count: kopya sayısı (orijinal dahil); angle_step derece; verilmezse 360/count (tam çember).""",
+    """Feature'ın dairesel dizisi: axis 'X'|'Y'|'Z' (orijinden) ya da silindirik yüzey/kenar; count orijinal dahil; angle_step yoksa 360/count.""",
     {"properties": {
         "document": DOC_PROP, "body": BODY_PROP, "feature": {"type": "string"},
         "axis": {"anyOf": [{"type": "string"}, {"type": "object"}]}, "count": {"type": "integer"},
@@ -416,9 +504,7 @@ def circ_pattern(s, feature, axis, count, angle_step=None, reverse=False, docume
 
 @tool(
     "mirror",
-    """Çalışılan gövdenin O ANA KADARKİ tamamını bir düzleme göre aynalar ve birleştirir (CATIA Mirror).
-plane: 'XY' | 'YZ' | 'ZX' | {plane: 'Plane.1'} | düzlemsel yüzey seçici. Tek bir feature'ı aynalamak için onu ayrı gövdede
-modelleyip aynalayın ve boolean ile ekleyin.""",
+    """Çalışılan gövdenin o ana kadarki TAMAMINI aynalar; plane 'XY'|'YZ'|'ZX'|{plane}|düzlemsel yüzey.""",
     {"properties": {"document": DOC_PROP, "body": BODY_PROP,
                     "plane": {"anyOf": [{"type": "string"}, {"type": "object"}]}, "name": {"type": "string"}},
      "required": ["plane"]},
@@ -476,7 +562,7 @@ def boolean(s, body, operation, target=None, document=None):
 
 @tool(
     "create_plane",
-    "Bir ana düzleme ya da düzlemsel yüzeye paralel, offset mm uzaklıkta referans düzlem oluşturur ('Construction' setine).",
+    """Ana düzleme ya da düzlemsel yüzeye paralel, offset mm uzaklıkta düzlem ('Construction' seti).""",
     {"properties": {"document": DOC_PROP, "body": BODY_PROP,
                     "base": {"anyOf": [{"type": "string"}, {"type": "object"}], "description": "'XY'|'YZ'|'ZX' ya da yüzey seçici"},
                     "offset": {"type": "number"}, "name": {"type": "string"}},
@@ -528,7 +614,7 @@ def _short(name: str) -> str:
 
 @tool(
     "list_parameters",
-    "Parça parametrelerini (ölçüler, açılar, kullanıcı parametreleri) değerleriyle listeler. filter ad içinde arar (ör. 'Pad.1').",
+    """Parça parametreleri ve değerleri; filter ad içinde arar (ör. 'Pad.1').""",
     {"properties": {"document": DOC_PROP, "filter": {"type": "string"}, "limit": {"type": "integer", "default": 60}}},
     mutating=False,
 )
@@ -550,8 +636,7 @@ def list_parameters(s, document=None, filter=None, limit=60):
 
 @tool(
     "set_parameter",
-    """Bir parametrenin değerini değiştirir ve parçayı günceller. name tam ya da benzersiz son kısmı olabilir
-(ör. 'Pad.1\\FirstLimit\\Length'). value: sayı (mm/derece) ya da metin ('25mm'). Update hatası olursa eski değer geri yazılır.""",
+    """Parametre değerini değiştirir (ad tam ya da son kısmı, ör. 'Pad.1\\FirstLimit\\Length'; değer sayı ya da '25mm'). Update hatasında eski değer geri yazılır.""",
     {"properties": {"document": DOC_PROP, "name": {"type": "string"},
                     "value": {"anyOf": [{"type": "number"}, {"type": "string"}, {"type": "boolean"}]}},
      "required": ["name", "value"]},
@@ -579,7 +664,7 @@ def set_parameter(s, name, value, document=None):
 
 @tool(
     "delete_feature",
-    "Bu oturumda asistanın oluşturduğu bir feature/sketch/gövdeyi siler. Kullanıcının nesneleri için set_feature_active kullanın.",
+    """Bu oturumda asistanın oluşturduğu nesneyi siler (geri alınamaz); kullanıcınınkiler için set_feature_active.""",
     {"properties": {"document": DOC_PROP, "name": {"type": "string"}}, "required": ["name"]},
     mutating=False,
 )

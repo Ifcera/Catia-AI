@@ -202,7 +202,7 @@ class Topology:
                 gname = 0
             info["type"] = {10: "line", 9: "circle", 8: "curve"}.get(gname, "curve")
             try:
-                info["length"] = r3(m.Length * 1000.0)
+                info["length"] = r3(m.Length)  # R20: Measurable.Length mm döner (Volume m³, Area m² aksine)
             except pywintypes.com_error:
                 pass
             try:

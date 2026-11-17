@@ -18,7 +18,8 @@ TOOL_LABELS = {
     "check_expectation": "Kontrol", "screenshot": "Görüntü", "get_selection": "Seçim", "present_plan": "Plan",
     "add_component": "Bileşen eklendi", "list_components": "Bileşenler", "set_component_position": "Konum",
     "add_assembly_constraint": "Montaj kısıtı", "update_product": "Montaj güncellendi", "check_assembly": "Montaj kontrolü",
-    "remove_constraint": "Kısıt silindi",
+    "remove_constraint": "Kısıt silindi", "create_helix": "Helix", "sweep": "Süpürme", "spring": "Yay",
+    "knurl": "Tırtıl", "model_thread": "Gerçek diş", "apply_material": "Malzeme", "list_materials": "Malzemeler",
 }
 
 # Okuma araçları sohbeti kalabalıklaştırmasın diye sönük gösterilir.
@@ -100,6 +101,10 @@ def result_summary(name: str, data: dict) -> str:
     if name == "get_design_state":
         n = sum(len(b.get("features", [])) for b in data.get("bodies", []))
         return t("{n} feature").format(n=n) + ("" if data.get("up_to_date", True) else t(" · update hatası var"))
+    if name == "create_helix":
+        return f"{data.get('helix', '')} · {_n(data.get('length_mm'))} mm"
+    if name == "apply_material":
+        return f"{data.get('material', '')} · {_n(data.get('mass_g'), 3)} g"
     if name == "add_component":
         return f"{data.get('instance', '')} ({data.get('part_number', '')})"
     if name == "add_assembly_constraint":

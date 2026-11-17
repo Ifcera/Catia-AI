@@ -151,6 +151,7 @@ EN: dict[str, str] = {
     "Yeni parça": "New part", "Yeni montaj": "New assembly", "Belgeler": "Documents", "Belge etkin": "Document activated",
     "Belge açıldı": "Document opened", "Kaydedildi": "Saved", "STEP dışa aktarıldı": "STEP exported",
     "Belge kapatıldı": "Document closed", "STL dışa aktarıldı": "STL exported", "Sketch": "Sketch",
+    "Helix": "Helix", "Süpürme": "Sweep", "Yay": "Spring", "Tırtıl": "Knurl", "Gerçek diş": "Modelled thread", "Malzeme": "Material", "Malzemeler": "Materials",
     "Sketch'e ekleme": "Add to sketch", "Sketch bilgisi": "Sketch info", "Delik": "Hole", "Pah": "Chamfer",
     "Doğrusal dizi": "Rectangular pattern", "Dairesel dizi": "Circular pattern", "Ayna": "Mirror",
     "Yeni gövde": "New body", "Referans düzlem": "Reference plane", "Parametreler": "Parameters",

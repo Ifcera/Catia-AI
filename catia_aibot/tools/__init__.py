@@ -16,8 +16,16 @@ from pathlib import Path
 
 from ..catia.com_thread import ComThread
 from ..catia.session import CatiaSession
-from . import assembly, document, features, inspect_tools, sketch  # noqa: F401  (araçları kaydeder)
-from .registry import REGISTRY, Registry, Tool, ToolResult
+from . import advanced, assembly, document, features, inspect_tools, sketch  # noqa: F401  (araçları kaydeder)
+from .registry import EXPECT_PROP, REGISTRY, Registry, Tool, ToolResult
+
+# Bitince aynı çağrıda beklenti kontrolü (expect) yapabilen araçlar — ayrı check_expectation turu gerekmez.
+EXPECT_TOOLS = ("pad", "pocket", "shaft", "groove", "hole", "fillet", "chamfer", "rect_pattern", "circ_pattern",
+                "mirror", "boolean", "sweep", "spring", "knurl", "model_thread", "set_parameter")
+for _n in EXPECT_TOOLS:
+    _t = REGISTRY.tools[_n]
+    _t.expect = True
+    _t.schema["properties"]["expect"] = EXPECT_PROP
 
 
 class CatiaTools:

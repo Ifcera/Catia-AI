@@ -2,7 +2,7 @@
 
 # CATIA V5 AI Assistant
 
-![status: alpha](https://img.shields.io/badge/status-alpha-orange) ![platform: Windows 64-bit](https://img.shields.io/badge/platform-Windows%2064--bit-blue) ![license: MIT](https://img.shields.io/badge/license-MIT-green)
+![status: alpha](https://img.shields.io/badge/status-alpha-orange) ![version: 0.2.0-alpha](https://img.shields.io/badge/version-0.2.0--alpha-orange) ![platform: Windows 64-bit](https://img.shields.io/badge/platform-Windows%2064--bit-blue) ![license: MIT](https://img.shields.io/badge/license-MIT-green)
 
 > ⚠️ **Alpha software.** This project is in an early alpha stage (not yet beta). Expect bugs, breaking changes
 > and missing features — it is under active development. Save your CATIA work before using it.
@@ -18,9 +18,17 @@ builds it in CATIA step by step with real features (pads, pockets, holes, patter
 
 ## Demo
 
+**New in v0.2.0-alpha** — a 45° elbow hose fitting with a real modelled M20×1.5 thread, softened hexagon and steel material:
+
+![The assistant modelling a 45° hose fitting with a real M20x1.5 thread in CATIA V5, sped up ~2.4×](docs/screenshots/demo_fitting.gif)
+
+*A ~70-second session sped up to 30 seconds.*
+
 ![The assistant building a mangonel catapult (parts + assembly) in CATIA V5, sped up ~9.5×](docs/screenshots/demo.gif)
 
 *A ~5-minute session building a catapult — parts, then the assembly with constraints — sped up to 30 seconds.*
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
 ## Screenshots
 
@@ -34,10 +42,13 @@ builds it in CATIA step by step with real features (pads, pockets, holes, patter
   fillet, chamfer, rectangular/circular patterns, mirror; measurements and topology checks.
 - **Assembly:** insert components, position them, constraints (fix / coincidence / contact / offset / angle),
   CATIA clash analysis, overall bounding box and "fits within" check.
+- **Helical features:** one-call compression springs (closed/ground ends), helix + sweep (rib/slot) for custom
+  helical shapes, straight/diagonal/cross **knurling** (e.g. heat-set inserts), **threaded holes** (ISO metric,
+  cosmetic threads, or real modelled ISO thread geometry for holes and shafts), and **materials** from the CATIA catalogue (brass, steel, aluminium…).
 - Export to STEP / STL, view captures so the model can see what it built.
 - Undo journal: every change made by the assistant can be rolled back.
 - **English / Türkçe** interface — switch under ⚙ settings → *Language* (restart to apply); the agent then answers in that language.
-- 44 tools in total, exposed as a local MCP server.
+- 51 tools in total, exposed as a local MCP server.
 
 ## Requirements
 
@@ -148,6 +159,11 @@ kelimelerle (isterseniz fotoğrafla) anlatırsınız; asistan planlar, CATIA'da 
 ve sonucu kontrol eder.
 
 > Bu proje **Dassault Systèmes ya da Anthropic ile bağlantılı değildir**.
+
+**v0.2.0-alpha'da yeni:** tek çağrıda basma yayı, helix + sweep, tırtıl; ISO metrik kozmetik ve gerçek (modelli) diş
+(`model_thread`, iç/dış, eğik eksenlerde de); CATIA kataloğundan malzeme ve kütle; token kullanımında belirgin azalma;
+kör delik derinliği, kenar uzunluğu birimi ve eğri gövdelerde sınır kutusu düzeltmeleri. Toplam 51 araç, 100 test.
+Ayrıntılar: [CHANGELOG.md](CHANGELOG.md).
 
 **Gereksinimler:** Windows 64-bit, CATIA V5 R20 64-bit, ve Claude Code (claude.ai Pro/Max aboneliği) **ya da**
 Claude / OpenAI / Gemini API anahtarı.

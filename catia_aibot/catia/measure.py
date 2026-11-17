@@ -106,6 +106,22 @@ def _extremum_coord(s: CatiaSession, m, k: int) -> float:
     raise ToolError("Sınır kutusu hesaplanamadı: extremum ölçülemedi.")
 
 
+_NORMAL_PLANE = ("PlaneYZ", "PlaneZX", "PlaneXY")  # normali X, Y, Z olan ana düzlemler
+_FAR = 10000.0
+
+
+def _far_plane_coord(s: CatiaSession, spa, part, hsf, hb, ex, k: int, is_max: bool) -> float:
+    base = s.ref(part, getattr(part.OriginElements, _NORMAL_PLANE[k]))
+    pl = hsf.AddNewPlaneOffset(base, _FAR, not is_max)  # +F (max için) ya da -F (min için)
+    hb.AppendHybridShape(pl)
+    try:
+        part.UpdateObject(pl)
+        dist = spa.GetMeasurable(s.ref(part, pl)).GetMinimumDistance(s.ref(part, ex))
+    except pywintypes.com_error as exc:
+        raise ToolError(f"Sınır kutusu hesaplanamadı: {com_error_text(exc)}") from None
+    return _FAR - dist if is_max else -_FAR + dist
+
+
 def bounding_box(s: CatiaSession, doc, part, body) -> dict:
     spa = s.spa(doc)
     hsf = part.HybridShapeFactory
@@ -128,7 +144,13 @@ def bounding_box(s: CatiaSession, doc, part, body) -> dict:
                     part.UpdateObject(ex)
                 except pywintypes.com_error as exc:
                     raise ToolError(f"Sınır kutusu hesaplanamadı: {com_error_text(exc)}") from None
-                (hi if is_max else lo)[k] = _extremum_coord(s, spa.GetMeasurable(s.ref(part, ex)), k)
+                try:
+                    coord = _extremum_coord(s, spa.GetMeasurable(s.ref(part, ex)), k)
+                except ToolError:
+                    # R20: sarmal gibi eğrisel gövdelerde extremum sonucu ölçülemiyor (GeometryName 0) ve gövdenin
+                    # bütününe mesafe de reddediliyor; ama extremum -> uzak düzlem mesafesi doğru çalışıyor.
+                    coord = _far_plane_coord(s, spa, part, hsf, hb, ex, k, bool(is_max))
+                (hi if is_max else lo)[k] = coord
     finally:
         try:
             s.delete_objects(doc, [hb])

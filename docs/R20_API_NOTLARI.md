@@ -14,7 +14,7 @@ Her madde bu makinedeki CATIA'da deneyle doğrulandı (2026-11-12). "Varsayım" 
 - Yinelenen `Product.PartNumber` (aynı numara iki açık belgede) reddediliyor.
 
 ## Ölçüm (SPAWorkbench)
-- Birimler: `Measurable.Volume` m³, `Area` m², `Length` m; `GetCOG`, `GetPoint`, `GetMinimumDistance`, `Radius` mm; `Inertia.Mass` kg (varsayılan yoğunluk 1000).
+- Birimler: `Measurable.Volume` m³, `Area` m²; `Length`, `GetCOG`, `GetPoint`, `GetMinimumDistance`, `Radius` mm (Length ilk notta yanlışlıkla m yazılmıştı); `Inertia.Mass` kg (varsayılan yoğunluk 1000).
 - **Tuzak:** feature'ı olmayan (boş) bir gövdeyi `GetMeasurable` ile ölçmek, o gövdenin ölçümünü belge boyunca bozuyor
   (sonradan katı eklense bile "Volume failed"). Çözüm: boş gövde ölçülmez; yine de bozulursa Inertia yedeği (kütle/yoğunluk).
 - `GetPlane` normali dış yönü **garanti etmiyor** (alt yüz +Z döndü). Dış yön sınır/ağırlık merkezi ile tahmin ediliyor.
@@ -66,6 +66,27 @@ Her madde bu makinedeki CATIA'da deneyle doğrulandı (2026-11-12). "Varsayım" 
 - Çakışma analizi bu kurulumda **lisanslı ve çalışıyor**: `SPAWorkbench.Clashes.Add()` → `ComputationType=0` → `Compute()` →
   `Conflicts`: Type 0 = çakışma (Value negatif = girişim, ör. −10.014 mm), 1 = temas (Value 0), 2 = boşluk. `Clashes.Remove` ile kayıt silinir.
 - `Inertias.Add(root)` montajın toplam kütlesini veriyor.
+
+## Sarmal, süpürme, diş, malzeme
+- `HybridShapeFactory.AddNewHelix(eksen doğrusu, ters, başlangıç noktası, hatve, yükseklik, saat_yönü, açı, koniklik, dışa)`:
+  boy formülle birebir (n·√((2πr)²+p²)); `saat_yönü=False` sağ el sarımı.
+- Profil eğriye dik düzlemde (`AddNewPlaneNormal(eğri, nokta)`) çizilip `ShapeFactory.AddNewRibFromRef(profil, eğri)` ile
+  süpürülünce hacim A·L ile birebir; `AddNewSlotFromRef` kanal açar ve dairesel dizisi tam N kat kaldırır.
+- Üç helix'i `AddNewJoin` ile birleştirip tek rib yapmak **başarısız** (geçişlerde kırık) → kapalı uçlu yayda her parça ayrı rib.
+- `AddNewSplit(XY, 0)` düzlemin + tarafını bırakır (taşlanmış yay uçları).
+- Sınır kutusu: sarmal gövdede extremum sonucu ölçülemiyor (GeometryName 0) ve gövdenin bütününe `GetMinimumDistance`
+  reddediliyor; **extremum → uzak ofset düzlem** mesafesi doğru çalışıyor (yedek yöntem olarak kullanılıyor).
+- Dişli delik: `Hole.ThreadingMode = 0`, `ThreadDiameter`, `ThreadPitch`, `ThreadDepth`; delik `Diameter` = kılavuz çapı.
+  Sonuna kadar delikte `ThreadDepth` verilmezse varsayılan 10 mm parçadan uzun kalıp update hatası veriyor.
+  `AddNewHoleFromSketch(sketch, depth)` derinlik argümanını uygulamıyor (delik 10 mm kalıyor): `BottomLimit.Dimension.Value`
+  ayrıca yazılmalı. Kör delikte `ThreadDepth` ≥ delik derinliği ise update hatası; diş boyu delikten kısa olmalı.
+- `Hole.GetOrigin` giriş yüzündeki merkez, `Hole.GetDirection` malzemeye doğru birim vektör.
+- Rib/Slot varsayılan "keep angle" modu, merkezde olmayan profili helix boyunca **döndürüyor** (helix burulması kadar:
+  M8 dış dişte 8,5 turda ~165°; köşe 3,23 yerine 2,94 mm yarıçapa iniyor). `slot.PullingDirElement = <helix ekseni>`
+  ile profil eksene göre sabit kalıyor; tur başına hacim Pappus ile 4 haneye kadar eşleşiyor. Dairesel profilde
+  (yay, tırtıl) fark etmez.
+- Malzeme: `<kurulum>/startup/materials/Catalog.CATMaterial` → `Families` → `Materials` ("Brass" 8216 kg/m³);
+  `part.GetItem("CATMatManagerVBExt").ApplyMaterialOnBody(gövde, malzeme, 0)`.
 
 ## Görüntü
 - `Viewer.CaptureToFile(5, yol)` JPEG; boyut = CATIA görüntü alanı (bu makinede 300×400, bir çalıştırmada 800×379).

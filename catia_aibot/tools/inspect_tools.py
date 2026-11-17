@@ -17,8 +17,7 @@ from .registry import BODY_PROP, DOC_PROP, EDGE_SELECTOR, FACE_SELECTOR, VEC3, T
 # ============================================================ tasarım durumu
 @tool(
     "get_design_state",
-    """Belgenin ağacını okur: gövdeler ve feature'ları (tür, güncel mi), sketch'ler, geometrik setler, çalışılan gövde,
-update hataları ve gövde hacimleri. Bir işe başlamadan ve hata ayıklarken kullanın.""",
+    """Ağaç: gövdeler, feature'lar (tür, güncel mi), sketch'ler, setler, update hataları, hacimler.""",
     {"properties": {"document": DOC_PROP, "include_volumes": {"type": "boolean", "default": True}}},
     mutating=False,
     category="inspect",
@@ -82,8 +81,7 @@ def update_part(s: CatiaSession, document=None):
 # ================================================================== ölçüm
 @tool(
     "measure",
-    """Bir gövdeyi ölçer: hacim (mm³), yüzey alanı (mm²), ağırlık merkezi (mm), sınır kutusu (min/max/size, mm) ve isteğe bağlı
-kütle (kg, CATIA'daki malzeme yoğunluğuyla; malzeme yoksa 1000 kg/m³).""",
+    """Gövde ölçümü: hacim, alan, ağırlık merkezi, sınır kutusu; mass=true ile kütle.""",
     {"properties": {"document": DOC_PROP, "body": BODY_PROP,
                     "bbox": {"type": "boolean", "default": True}, "mass": {"type": "boolean", "default": False}}},
     mutating=False,
@@ -116,7 +114,7 @@ def _target_ref(s: CatiaSession, doc, part, spec: dict):
 
 @tool(
     "measure_distance",
-    "İki öğe arasındaki en kısa mesafe (mm). a ve b: {face: seçici} | {edge: seçici} | {object: 'Pad.1'/'Plane.1'} | {body: 'PartBody'}.",
+    """İki öğe arası en kısa mesafe (mm); a/b: {face}|{edge}|{object}|{body}.""",
     {"properties": {"document": DOC_PROP, "a": {"type": "object"}, "b": {"type": "object"}}, "required": ["a", "b"]},
     mutating=False,
     category="inspect",
@@ -131,10 +129,7 @@ def measure_distance(s: CatiaSession, a, b, document=None):
 # ================================================================ topoloji
 @tool(
     "list_topology",
-    """Bir gövdenin yüzeylerini ve/veya kenarlarını kalıcı kimliklerle (F1.., E1..) listeler. Yüzey: tür, alan, merkez, dış normal
-(normal_confidence: high | estimated), yarıçap, üreten feature'lar. Kenar: tür (line/circle), uzunluk, başlangıç/orta/bitiş, yön,
-yarıçap/merkez, komşu yüzey kimlikleri. Kimlikler oturum boyunca aynı yüzeye bağlı kalır. Filtrelemek için face_filter/edge_filter
-seçici nesnesi verin (ör. {axis:'+Z'} ya da {on_face:'F1'}).""",
+    """Gövdenin yüz/kenarlarını kalıcı kimliklerle (F1, E1) listeler; face_filter/edge_filter seçiciyle daralt.""",
     {"properties": {"document": DOC_PROP, "body": BODY_PROP, "kind": {"enum": ["faces", "edges", "both"], "default": "faces"},
                     "face_filter": {"type": "object"}, "edge_filter": {"type": "object"}, "limit": {"type": "integer", "default": 80}}},
     mutating=False,
@@ -159,8 +154,7 @@ def list_topology(s: CatiaSession, document=None, body=None, kind="faces", face_
 # ======================================================= beklenti kontrolü
 @tool(
     "check_expectation",
-    """Ölçülen değerleri beklenenle karşılaştırır: volume_mm3 (± volume_tolerance_pct, varsayılan %1), bbox_size [x,y,z] ve/veya
-bbox_min/bbox_max (± bbox_tolerance_mm, varsayılan 0.05), update hatası olmaması. Her aşamadan sonra çağırın.""",
+    """Ölçülen-beklenen karşılaştırma: volume_mm3 (tol %1), bbox_size/min/max (tol 0,05 mm), update. Çoğunlukla feature çağrısındaki expect yeter.""",
     {"properties": {"document": DOC_PROP, "body": BODY_PROP,
                     "volume_mm3": {"type": "number"}, "volume_tolerance_pct": {"type": "number"},
                     "bbox_size": VEC3, "bbox_min": VEC3, "bbox_max": VEC3, "bbox_tolerance_mm": {"type": "number"}}},
@@ -291,9 +285,7 @@ def _shrink(src: Path, dst: Path, max_size: int):
 
 @tool(
     "screenshot",
-    """CATIA görüntüsünü alır. views: ['iso','front','back','left','right','top','bottom','iso_back','current'] (birden çok verilebilir;
-her biri ayrı görüntü). Görünüm değiştirilip sığdırılır, sonra kullanıcının görünümü geri yüklenir. Görüntüler sohbette gösterilir
-ve size iletilir; gereksiz görüntü almayın (her biri ücretlidir).""",
+    """CATIA görüntüsü; views: iso|front|back|left|right|top|bottom|iso_back|current (en fazla 4). Görüntüler ücretlidir.""",
     {"properties": {"document": DOC_PROP, "views": {"type": "array", "items": {"type": "string"}, "default": ["iso"]},
                     "max_size": {"type": "integer", "default": 800}}},
     mutating=False,

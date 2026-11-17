@@ -363,16 +363,54 @@ def _sketch_report(s: CatiaSession, part, sk, meta: dict) -> dict:
 
 
 def _support(s: CatiaSession, doc, part, body, support):
+    """Dönüş: (destek, açıklama, eğri başlangıç noktası xyz ya da None)."""
     if isinstance(support, str) and support.upper() in ("XY", "YZ", "ZX", "XZ"):
-        return s.origin_plane(part, support), f"{support.upper()} ana düzlemi"
+        return s.origin_plane(part, support), f"{support.upper()} ana düzlemi", None
     if isinstance(support, dict) and "plane" in support:
         obj = s.find_object(part, support["plane"])
-        return s.ref(part, obj), f"düzlem {support['plane']}"
+        return s.ref(part, obj), f"düzlem {support['plane']}", None
+    if isinstance(support, dict) and "normal_to" in support:
+        from .advanced import _add, construction_set  # döngüsel içe aktarmayı önlemek için burada
+
+        curve = s.find_object(part, support["normal_to"])
+        hb = construction_set(s, doc, part)
+        hsf = part.HybridShapeFactory
+        at_end = support.get("at") == "end"
+        pt = _add(s, doc, part, hb, hsf.AddNewPointOnCurveFromPercent(s.ref(part, curve), 1.0 if at_end else 0.0, False))
+        pl = _add(s, doc, part, hb, hsf.AddNewPlaneNormal(s.ref(part, curve), s.ref(part, pt)))
+        xyz = list(s.vb_array(s.spa(doc).GetMeasurable(s.ref(part, pt)), "GetPoint", 3))
+        return s.ref(part, pl), f"{support['normal_to']} eğrisine dik düzlem ({'son' if at_end else 'başlangıç'} noktası)", xyz
     topo = Topology(s, doc, part, body)
     face = topo.resolve_faces(support, many=False)[0]
     if face.info.get("type") != "planar":
         raise ToolError(f"{face.id} düzlemsel değil ({face.info.get('type')}); sketch düzlemsel yüzeye açılır.")
-    return face.ref, f"yüzey {face.id} ({describe_face(face.info)})"
+    return face.ref, f"yüzey {face.id} ({describe_face(face.info)})", None
+
+
+_POINT_KEYS = ("center", "corner", "start", "end", "at")
+
+
+def _shift_elements(elements: list, du: float, dv: float) -> list:
+    """normal_to desteğinde öğe koordinatları eğri başlangıcına göredir; sketch'in yerel koordinatına kaydır."""
+    def sh(p):
+        return [p[0] + du, p[1] + dv]
+    out = []
+    for el in elements or []:
+        e = dict(el)
+        for k in _POINT_KEYS:
+            if k in e and isinstance(e[k], list):
+                e[k] = sh(e[k])
+        if "segments" in e:
+            segs = []
+            for sg in e["segments"]:
+                g = dict(sg)
+                for k in ("line_to", "arc_to", "center"):
+                    if k in g:
+                        g[k] = sh(g[k])
+                segs.append(g)
+            e["segments"] = segs
+        out.append(e)
+    return out
 
 
 def _run_builder(s, doc, part, sk, meta, elements, constraints, auto):
@@ -390,64 +428,43 @@ def _run_builder(s, doc, part, sk, meta, elements, constraints, auto):
     return b, names
 
 
+# Kısa tutulur: her model isteğinde gönderilir. Alan tipleri açıklamada; öğe hataları _Builder'da anlaşılır biçimde döner.
 ELEMENT_SCHEMA = {
     "type": "object",
     "description": (
-        "Sketch öğesi. type'a göre alanlar:\n"
-        "rectangle: center [u,v] (veya corner [u,v] = sol-alt köşe), width, height  -> alt öğeler: bottom,right,top,left,p0..p3\n"
-        "circle: center [u,v], radius (veya diameter)  -> alt öğe: center\n"
-        "profile: start [u,v], segments [{line_to:[u,v]} | {arc_to:[u,v], center:[u,v], ccw:true}], closed (varsayılan true; "
-        "son nokta başa eşit değilse düz kapatılır)  -> seg1.., v0.., c<i> (yay merkezleri)\n"
-        "line: start, end  -> start, end\n"
-        "axis: start, end (shaft/groove dönme ekseni; sketch başına bir tane)\n"
-        "arc: center, radius, start_angle, end_angle (derece, saat yönünün tersine)  -> center,start,end\n"
-        "point: at [u,v]\n"
-        "Ortak: id (sonraki kısıtlarda kullanılacak ad, ör. 'r1'), construction (true ise yardımcı geometri)."
+        "Koordinatlar yerel [u,v] mm. rectangle{center|corner(sol-alt),width,height} circle{center,radius|diameter} "
+        "profile{start,segments:[{line_to}|{arc_to,center,ccw}],closed=true} line{start,end} axis{start,end}(shaft ekseni) "
+        "arc{center,radius,start_angle,end_angle(°)} point{at}; ortak: id, construction. Alt adlar: rectangle "
+        "bottom/right/top/left/p0..p3, circle center, profile seg<i>/v<i>/c<i>."
     ),
-    "properties": {
-        "type": {"enum": ["rectangle", "circle", "profile", "line", "axis", "arc", "point"]},
-        "id": {"type": "string"},
-        "center": VEC2, "corner": VEC2, "width": {"type": "number"}, "height": {"type": "number"},
-        "radius": {"type": "number"}, "diameter": {"type": "number"},
-        "start": VEC2, "end": VEC2, "at": VEC2,
-        "start_angle": {"type": "number"}, "end_angle": {"type": "number"},
-        "segments": {"type": "array", "items": {"type": "object"}},
-        "closed": {"type": "boolean"}, "construction": {"type": "boolean"},
-    },
+    "properties": {"type": {"enum": ["rectangle", "circle", "profile", "line", "axis", "arc", "point"]}},
     "required": ["type"],
 }
 CONSTRAINT_SCHEMA = {
     "type": "object",
     "description": (
-        "Elle kısıt. elements: öğe adları ('r1.top', 'c1', 'c1.center', CATIA adı 'Line.3', eksenler 'H', 'V', orijin 'O'). "
-        "Tek öğeli: length, radius, horizontal, vertical, fix. İki öğeli: distance, on/coincident, concentric, tangent, angle, "
-        "parallel, perpendicular, midpoint. Üç öğeli: symmetric (a, b, simetri ekseni). value: mm ya da derece."
+        "{type, elements, value(mm|°)}. elements: 'r1.top', 'c1.center', 'Line.3', eksen 'H'/'V', orijin 'O'. 1 öğe: length "
+        "radius horizontal vertical fix; 2: distance on concentric tangent angle parallel perpendicular midpoint; 3: symmetric."
     ),
-    "properties": {
-        "type": {"enum": sorted(CST)},
-        "elements": {"type": "array", "items": {"type": "string"}},
-        "value": {"type": "number"},
-    },
+    "properties": {"type": {"enum": sorted(CST)}, "elements": {"type": "array", "items": {"type": "string"}}},
     "required": ["type", "elements"],
 }
 
 
 @tool(
     "create_sketch",
-    """Bir düzlem ya da düzlemsel yüzey üzerinde sketch oluşturur ve tüm öğelerini tek çağrıda çizer.
-auto_constrain (varsayılan true) her öğeyi normal CATIA kısıtlarıyla tam kısıtlar. Koordinatlar sketch'in yerel H/V
-eksenlerinde mm'dir; sonuçtaki local_axes bunların global karşılığını verir (XY: H=+X,V=+Y; YZ: H=+Y,V=+Z; ZX: H=+Z,V=+X;
-yüzey üzerinde CATIA kendisi seçer ve orijin parça orijininin yüzeye izdüşümüdür). Sonuçta constraint_problems varsa
-sketch hatalıdır ve geri alınır. Kapalı profiller pad/pocket için, 'axis' içeren profiller shaft/groove içindir.""",
+    """Sketch'i tüm öğeleriyle tek çağrıda kurar; auto_constrain ile tam kısıtlar. Yerel eksenler sonuçta local_axes
+(XY: u=+X,v=+Y; YZ: u=+Y,v=+Z; ZX: u=+Z,v=+X). constraint_problems dönerse geri alınmıştır. Sketch'i yalnız sweep ya da
+elle kısıt için ayrı kurun; pad/pocket/shaft/groove 'profile' ile sketch'i kendisi kurar.""",
     {
         "properties": {
             "document": DOC_PROP, "body": BODY_PROP,
-            "support": {"description": "'XY' | 'YZ' | 'ZX' | {plane: 'Plane.1'} | yüzey seçici (ör. 'F3' ya da {axis:'+Z', side:'max'})",
+            "support": {"description": "'XY'|'YZ'|'ZX' | {plane: ad} | {normal_to: eğri, at: start|end} ([0,0]=eğri üstü) | yüzey seçici",
                         "anyOf": [{"type": "string"}, {"type": "object"}]},
             "elements": {"type": "array", "items": ELEMENT_SCHEMA},
             "constraints": {"type": "array", "items": CONSTRAINT_SCHEMA},
-            "auto_constrain": {"type": "boolean", "default": True},
-            "name": {"type": "string", "description": "İsteğe bağlı sketch adı."},
+            "auto_constrain": {"type": "boolean"},
+            "name": {"type": "string"},
         },
         "required": ["support", "elements"],
     },
@@ -457,12 +474,18 @@ def create_sketch(s: CatiaSession, support, elements: list, document: str | None
                   constraints: list | None = None, auto_constrain: bool = True, name: str | None = None):
     doc, part = s.part_document(document)
     b = s.body(part, body)
-    sup, sup_desc = _support(s, doc, part, b, support)
+    sup, sup_desc, path_xyz = _support(s, doc, part, b, support)
     part.InWorkObject = b
     sk = b.Sketches.Add(sup)
     s.journal.record(f"{sk.Name} sil", lambda d=doc, o=sk: s.delete_objects(d, [o]))
     if name:
         sk.Name = name
+    path_uv = None
+    if path_xyz is not None:
+        ax = s.vb_array(sk, "GetAbsoluteAxisData", 9)
+        rel = [path_xyz[i] - ax[i] for i in range(3)]
+        path_uv = [sum(rel[i] * ax[3 + i] for i in range(3)), sum(rel[i] * ax[6 + i] for i in range(3))]
+        elements = _shift_elements(elements, *path_uv)
     meta = {"elements": {}, "dof": 0}
     _run_builder(s, doc, part, sk, meta, elements, constraints, auto_constrain)
     s.sketch_meta[(doc.Name, sk.Name)] = meta
@@ -470,6 +493,9 @@ def create_sketch(s: CatiaSession, support, elements: list, document: str | None
     failing = s.update(part)
     rep = _sketch_report(s, part, sk, meta)
     rep["support"] = sup_desc
+    if path_uv is not None:
+        rep["path_start_local"] = vec3(path_uv + [0])[:2]
+        rep["path_point"] = vec3(path_xyz)
     if rep.get("constraint_problems") or sk.Name in failing:
         raise ToolError("Sketch kısıtları çözülemedi; sketch geri alındı.", hint="Ölçüleri ve konumları kontrol edin.",
                         constraint_problems=rep.get("constraint_problems"), failing=failing)
@@ -482,9 +508,9 @@ def create_sketch(s: CatiaSession, support, elements: list, document: str | None
     {
         "properties": {
             "document": DOC_PROP, "sketch": {"type": "string"},
-            "elements": {"type": "array", "items": ELEMENT_SCHEMA},
-            "constraints": {"type": "array", "items": CONSTRAINT_SCHEMA},
-            "auto_constrain": {"type": "boolean", "default": True},
+            "elements": {"type": "array", "items": {"type": "object"}},
+            "constraints": {"type": "array", "items": {"type": "object"}},
+            "auto_constrain": {"type": "boolean"},
         },
         "required": ["sketch"],
     },

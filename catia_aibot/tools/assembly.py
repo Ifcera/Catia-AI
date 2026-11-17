@@ -27,19 +27,14 @@ CST_NAMES = {v: k for k, v in CST_TYPES.items()}
 ORIENT = {"same": 0, "opposite": 1, "undefined": 2}
 STATUS = {0: "OK", 1: "sağlanamadı", 2: "yanlış yön", 3: "yanlış değer", 4: "uygun olmayan geometri", 5: "kopuk"}
 CONFLICT = {0: "çakışma", 1: "temas", 2: "boşluk"}
-PRODUCT_PROP = {"type": "string", "description": "Montaj belgesi adı (ör. 'Mancinik.CATProduct'). Boşsa etkin belge."}
+PRODUCT_PROP = {"type": "string"}
 ELEMENT = {
     "type": "object",
-    "description": (
-        "Montajdaki bir öğe: {instance: 'Taban.1', element: ...}. element: 'XY'|'YZ'|'ZX' (bileşenin ana düzlemi), "
-        "{plane: 'Plane.1'} (parçadaki referans düzlem), bir yüzey seçici (parçanın list_topology kimliği 'F3' ya da "
-        "{axis:'+Z', side:'max'}, {type:'cylindrical', radius:4} ...; koordinatlar PARÇANIN kendi koordinatlarıdır). "
-        "Silindirik yüzey seçilirse eksen kullanılır (ör. pim ile deliğin eksen çakıştırması)."
-    ),
-    "properties": {"instance": {"type": "string"}, "element": {"anyOf": [{"type": "string"}, {"type": "object"}]},
-                   "body": {"type": "string"}},
+    "description": "{instance, element: 'XY'|'YZ'|'ZX'|'component'|{plane: ad}|yüzey seçici (PARÇA koordinatında), body?}",
+    "properties": {"instance": {"type": "string"}},
     "required": ["instance", "element"],
 }
+ELEMENT_B = {"type": "object", "description": "a ile aynı biçim."}
 
 
 # ================================================================ yardımcılar
@@ -208,10 +203,7 @@ def _moved(before: dict, after: dict) -> list[dict]:
 # ===================================================================== araçlar
 @tool(
     "add_component",
-    """Montaja bir parçayı bileşen (örnek) olarak ekler. source: açık bir parça belgesinin adı ('Taban.CATPart') ya da
-çalışma klasöründeki bir dosya. Aynı parça birden çok kez eklenebilir (ör. iki yan dikme). instance_name verilirse örnek
-yeniden adlandırılır. Bileşen parçanın kendi koordinatlarıyla montaj orijinine yerleşir; sonra set_component_position ya da
-kısıtlarla konumlandırın.""",
+    """Montaja parça ekler: source açık belge adı ya da çalışma klasöründeki dosya; instance_name; origin. Aynı parça birden çok kez eklenebilir.""",
     {"properties": {"document": PRODUCT_PROP, "source": {"type": "string"}, "instance_name": {"type": "string"},
                     "origin": VEC3}, "required": ["source"]},
     category="assembly",
@@ -255,7 +247,7 @@ def add_component(s: CatiaSession, source: str, document=None, instance_name=Non
 
 @tool(
     "list_components",
-    "Montajdaki bileşenleri (örnek adı, parça numarası, konum) ve montaj kısıtlarını (tür, durum, değer) listeler.",
+    """Bileşenler (ad, parça no, konum) ve montaj kısıtları (tür, durum, değer).""",
     {"properties": {"document": PRODUCT_PROP}},
     mutating=False,
     category="assembly",
@@ -280,9 +272,7 @@ def list_components(s: CatiaSession, document=None):
 
 @tool(
     "set_component_position",
-    """Bir bileşeni montaj koordinatlarında konumlandırır. origin: bileşen orijininin yeri (mm). rotations: sırayla uygulanan
-dönmeler [{axis: 'X'|'Y'|'Z', angle: derece}] (montaj eksenleri etrafında). Kısıtlı bileşenler update ile yeniden kısıtların
-belirlediği yere döner; konumlandırmayı kısıtlarla yapmak tercih edilir, bu araç ilk yerleşim ya da serbest bileşenler içindir.""",
+    """Bileşeni konumlar: origin + rotations [{axis, angle°}] (sırayla, montaj eksenleri). Kısıtlı bileşen update'te kısıtın yerine döner.""",
     {"properties": {"document": PRODUCT_PROP, "instance": {"type": "string"}, "origin": VEC3,
                     "rotations": {"type": "array", "items": {"type": "object", "properties": {
                         "axis": {"enum": ["X", "Y", "Z"]}, "angle": {"type": "number"}}, "required": ["axis", "angle"]}}},
@@ -300,12 +290,8 @@ def set_component_position(s: CatiaSession, instance: str, origin, document=None
 
 @tool(
     "add_assembly_constraint",
-    """İki öğe arasında montaj kısıtı ekler ve montajı günceller (bileşenler kısıta göre hareket eder).
-type: coincidence (düzlem-düzlem çakışık ya da silindirik yüzeylerin EKSENLERİ çakışık) | contact (yüzey teması) |
-offset (iki düzlem/yüzey arası mesafe, value mm) | angle (value derece) | parallel | perpendicular | fix (yalnız a; bileşeni sabitler).
-Montajda ilk bileşeni fix ile sabitleyin. orientation: same | opposite | undefined (yüzey yönleri).
-Kısıt çözülemezse ekleme geri alınır ve bileşenler eski yerine döner.""",
-    {"properties": {"document": PRODUCT_PROP, "type": {"enum": sorted(CST_TYPES)}, "a": ELEMENT, "b": ELEMENT,
+    """Montaj kısıtı ekler ve günceller (bileşenler hareket eder): coincidence (düzlem/eksen; silindirde eksen) | contact | offset (value mm) | angle (value °) | parallel | perpendicular | fix (yalnız a). orientation same|opposite. Çözülemezse geri alınır.""",
+    {"properties": {"document": PRODUCT_PROP, "type": {"enum": sorted(CST_TYPES)}, "a": ELEMENT, "b": ELEMENT_B,
                     "value": {"type": "number"}, "orientation": {"enum": ["same", "opposite", "undefined"]},
                     "name": {"type": "string"}},
      "required": ["type", "a"]},
@@ -470,11 +456,7 @@ def assembly_bbox(s: CatiaSession, root) -> dict | None:
 
 @tool(
     "check_assembly",
-    """Montajı kontrol eder: güncelleme, kısıt durumları, her bileşenin kısıtlanıp kısıtlanmadığı, çakışmalar
-(type: çakışma = girişim, value_mm negatif = girişim derinliği; temas; boşluk) ve toplam kütle/hacim.
-expect_contacts: temas etmesi BEKLENEN bileşen çiftleri [['Pim.1','Kol.1'], ...] — sonuçta işaretlenir. clearance: mm
-verilirse bu mesafeden yakın çiftler 'boşluk' olarak raporlanır. Sonuçta montajın sınır kutusu da döner; fit_within [x,y,z] mm
-verilirse sığıp sığmadığı kontrol edilir (ör. [150,150,150]).""",
+    """Montaj kontrolü: kısıt durumu, çakışma (value_mm negatif = girişim), beklenen temaslar (expect_contacts), clearance, sınır kutusu ve fit_within [x,y,z], kütle.""",
     {"properties": {"document": PRODUCT_PROP, "clearance": {"type": "number"},
                     "expect_contacts": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
                     "fit_within": VEC3}},

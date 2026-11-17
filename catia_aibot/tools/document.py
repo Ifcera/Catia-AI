@@ -29,7 +29,7 @@ def _part_numbers_in_use(s: CatiaSession) -> dict[str, str]:
 
 @tool(
     "new_part",
-    "Yeni boş bir CATPart oluşturur ve etkin yapar. name parçanın Part Number'ı olur (montajda görünen ad).",
+    """Yeni CATPart; name = Part Number (montajda görünen ad).""",
     {"properties": {"name": {"type": "string", "description": "Parça numarası, ör. 'Taban'."}}, "required": ["name"]},
     category="document",
 )
@@ -116,12 +116,13 @@ def open_document(s: CatiaSession, filename: str):
 
 @tool(
     "save_document",
-    "Belgeyi çalışma klasörüne kaydeder. filename verilmezse belge adıyla kaydeder. Var olan dosyanın üzerine yazar.",
-    {"properties": {"document": DOC_PROP, "filename": {"type": "string"}}},
+    """Belgeyi çalışma klasörüne kaydeder (üzerine yazar); export: ['stl','step'] aynı çağrıda dışa aktarır.""",
+    {"properties": {"document": DOC_PROP, "filename": {"type": "string"},
+                    "export": {"type": "array", "items": {"enum": ["stl", "step"]}}}},
     mutating=False,
     category="document",
 )
-def save_document(s: CatiaSession, document: str | None = None, filename: str | None = None):
+def save_document(s: CatiaSession, document: str | None = None, filename: str | None = None, export=None):
     doc = s.document(document)
     ext = ".CATProduct" if doc.Name.lower().endswith(".catproduct") else ".CATPart"
     if filename is None:
@@ -135,13 +136,17 @@ def save_document(s: CatiaSession, document: str | None = None, filename: str | 
     except pywintypes.com_error as exc:
         raise ToolError(f"Kaydedilemedi: {com_error_text(exc)}",
                         hint="Dosya başka bir programda açık olabilir ya da ad geçersiz.") from None
-    return {"document": doc.Name, "path": str(p)}
+    out = {"document": doc.Name, "path": str(p)}
+    for fmt in export or []:
+        stem = str(p.with_suffix(""))
+        r = export_stl(s, stem + ".stl", doc.Name) if fmt == "stl" else export_step(s, stem + ".stp", doc.Name)
+        out[fmt] = {k: v for k, v in r.items() if k in ("path", "triangles", "size_bytes")}
+    return out
 
 
 @tool(
     "export_stl",
-    """Bir CATPart'ı çalışma klasörüne STL olarak dışa aktarır (3D baskı için; CATIA ASCII STL yazar). Montaj (CATProduct)
-STL'ye aktarılamaz: her parçayı ayrı aktarın. Sonuçta üçgen sayısı döner.""",
+    """CATPart'ı çalışma klasörüne STL olarak aktarır (montaj değil); üçgen sayısı döner.""",
     {"properties": {"document": DOC_PROP, "filename": {"type": "string"}}, "required": ["filename"]},
     mutating=False,
     category="document",

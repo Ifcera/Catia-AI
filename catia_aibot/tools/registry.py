@@ -42,6 +42,7 @@ class Tool:
     handler: Callable[..., Any]
     mutating: bool = True
     category: str = "part"
+    expect: bool = False  # True: girdide 'expect' kabul eder; iş bitince aynı çağrıda beklenti kontrolü yapılır
 
     def anthropic_spec(self) -> dict:
         return {"name": self.name, "description": self.description, "input_schema": self.schema}
@@ -64,6 +65,7 @@ class Registry:
         if tool is None:
             return ToolResult({"ok": False, "error": f"Bilinmeyen araç: {name}"})
         args = dict(args or {})
+        expect = args.pop("expect", None) if tool.expect else None
         sp = session.journal.savepoint() if tool.mutating else None
         guard = DialogGuard() if guard_dialogs else None
         try:
@@ -80,6 +82,8 @@ class Registry:
             else:
                 data = out or {}
             data = {"ok": True, **data}
+            if expect:
+                data["check"] = _run_expect(session, args, data, expect)
             if guard and guard.dialogs:
                 data["dialogs_closed"] = guard.summary()
             return ToolResult(data, images)
@@ -101,39 +105,51 @@ class Registry:
             return ToolResult(err)
 
 
+def _run_expect(session: CatiaSession, args: dict, data: dict, expect: dict) -> dict:
+    """Ayrı bir check_expectation turu yerine, araç bitince aynı çağrıda beklenti kontrolü (token/tur tasarrufu).
+    Yalnızca kalan kontrolleri ayrıntılı döndürür."""
+    from .inspect_tools import check_expectation
+
+    kw = {k: v for k, v in expect.items() if k in ("volume_mm3", "bbox_size", "bbox_min", "bbox_max")}
+    if "tol_pct" in expect:
+        kw["volume_tolerance_pct"] = expect["tol_pct"]
+    if "tol_mm" in expect:
+        kw["bbox_tolerance_mm"] = expect["tol_mm"]
+    try:
+        r = check_expectation(session, document=args.get("document"), body=data.get("body") or args.get("body"), **kw)
+    except Exception as exc:  # noqa: BLE001 - kontrol hatası işlemi geri almaz
+        return {"passed": False, "error": str(exc)}
+    failed = [c for c in r["checks"] if not c["pass"]]
+    out = {"passed": r["passed"]}
+    if failed:
+        out["failed"] = failed
+    return out
+
+
 REGISTRY = Registry()
 
+EXPECT_PROP = {"type": "object", "description": "Aynı çağrıda kontrol: {volume_mm3, bbox_size, bbox_min, bbox_max, tol_pct, tol_mm}."}
 
-def tool(name: str, description: str, schema: dict, mutating: bool = True, category: str = "part"):
-    """Bir fonksiyonu araç olarak kaydeden dekoratör."""
+
+def tool(name: str, description: str, schema: dict, mutating: bool = True, category: str = "part", expect: bool = False):
+    """Bir fonksiyonu araç olarak kaydeden dekoratör. expect=True: şemaya 'expect' (aynı çağrıda kontrol) eklenir."""
 
     def deco(fn):
         full = {"type": "object", "additionalProperties": False, **schema}
         full.setdefault("properties", {})
-        REGISTRY.register(Tool(name, description.strip(), full, fn, mutating, category))
+        if expect:
+            full["properties"] = {**full["properties"], "expect": EXPECT_PROP}
+        REGISTRY.register(Tool(name, description.strip(), full, fn, mutating, category, expect))
         return fn
 
     return deco
 
 
 # Şemalarda tekrar eden parçalar
-DOC_PROP = {"type": "string", "description": "Belge adı (ör. 'Taban.CATPart'). Boşsa etkin belge."}
-BODY_PROP = {"type": "string", "description": "Gövde adı (ör. 'PartBody'). Boşsa çalışılan (in-work) gövde."}
+# Ortak alanların anlamı rehberde (skill_catia.md) bir kez anlatılır; şemalarda tekrar edilmez (her istekte token).
+DOC_PROP = {"type": "string"}
+BODY_PROP = {"type": "string"}
 VEC3 = {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
 VEC2 = {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}
-FACE_SELECTOR = {
-    "description": (
-        "Yüzey seçici. Ya list_topology'den bir kimlik ('F3') ya da nesne: "
-        "{type: planar|cylindrical|..., axis: 'X'|'Y'|'Z'|'+Z'|'-Z' (düzlem normali), side: 'max'|'min' (eksen boyunca en uçtaki), "
-        "near: [x,y,z] (merkezi bu noktaya en yakın), feature: 'Pad.1' (bu feature'dan gelen), radius: r}."
-    ),
-    "anyOf": [{"type": "string"}, {"type": "object"}],
-}
-EDGE_SELECTOR = {
-    "description": (
-        "Kenar seçici. Kimlik ('E5'), kimlik listesi ya da nesne: {type: line|circle, parallel_to: 'X'|'Y'|'Z', "
-        "on_face: <yüzey seçici>, between: [<yüzey>, <yüzey>], near: [x,y,z], all: true (near ile hepsini sırala), radius: r}. "
-        "Nesne seçici uyan TÜM kenarları seçer."
-    ),
-    "anyOf": [{"type": "string"}, {"type": "object"}, {"type": "array"}],
-}
+FACE_SELECTOR = {"description": "Yüzey seçici (rehber).", "anyOf": [{"type": "string"}, {"type": "object"}]}
+EDGE_SELECTOR = {"description": "Kenar seçici (rehber).", "anyOf": [{"type": "string"}, {"type": "object"}, {"type": "array"}]}
